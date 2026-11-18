@@ -62,7 +62,10 @@ class EngagementWeightingEngine:
                 "bearish_ratio": 0.33,
                 "neutral_ratio": 0.34,
                 "retail_smart_divergence": 0.0,
-                "engagement_volume_score": 0.0
+                "engagement_volume_score": 0.0,
+                "dominant_stated_position": "NONE",
+                "stated_position_counts": {"long": 0, "short": 0, "flat": 0},
+                "post_mentioned_levels": []
             }
 
         # Calculate social weighted sentiment
@@ -75,6 +78,11 @@ class EngagementWeightingEngine:
         bear_cnt = 0
         neut_cnt = 0
 
+        pos_long = 0
+        pos_short = 0
+        pos_flat = 0
+        mentioned_levels_set = set()
+
         for p in social_posts:
             score = p.get("sentiment_score", 0.0)
             raw_scores.append(score)
@@ -85,12 +93,34 @@ class EngagementWeightingEngine:
             reposts_acc += p.get("reposts", 0)
             views_acc += p.get("views", 0)
 
+            # Extract stated retail stance
+            st_pos = p.get("stated_position")
+            if st_pos == "LONG":
+                pos_long += 1
+            elif st_pos == "SHORT":
+                pos_short += 1
+            elif st_pos == "FLAT":
+                pos_flat += 1
+
+            # Extract mentioned levels
+            for lv in p.get("mentioned_levels", []):
+                mentioned_levels_set.add(lv)
+
             if score >= 0.10:
                 bull_cnt += 1
             elif score <= -0.10:
                 bear_cnt += 1
             else:
                 neut_cnt += 1
+
+        if pos_long > pos_short and pos_long >= 2:
+            dominant_stated = "LONG"
+        elif pos_short > pos_long and pos_short >= 2:
+            dominant_stated = "SHORT"
+        elif pos_flat > 0 and pos_flat >= pos_long and pos_flat >= pos_short:
+            dominant_stated = "FLAT"
+        else:
+            dominant_stated = "NONE"
 
         raw_social_mean = float(np.mean(raw_scores))
         sum_weights = sum(weights)
@@ -136,5 +166,8 @@ class EngagementWeightingEngine:
             "total_likes": likes_acc,
             "total_reposts": reposts_acc,
             "total_views": views_acc,
-            "engagement_volume_score": round(math.log10(1 + likes_acc * 2 + reposts_acc * 3 + views_acc * 0.1), 3)
+            "engagement_volume_score": round(math.log10(1 + likes_acc * 2 + reposts_acc * 3 + views_acc * 0.1), 3),
+            "dominant_stated_position": dominant_stated,
+            "stated_position_counts": {"long": pos_long, "short": pos_short, "flat": pos_flat},
+            "post_mentioned_levels": sorted(list(mentioned_levels_set))[:5]
         }

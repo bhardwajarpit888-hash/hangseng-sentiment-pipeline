@@ -1,8 +1,8 @@
 # Cross-Exchange Alternative Sentiment & n+1 Price Prediction Pipeline
 
-A quantitative sentiment ingestion and machine learning pipeline that predicts next-period asset returns and prices ($n+1$) across the **Hong Kong Stock Exchange (Hang Seng / HKEX)** and the **Korea Exchange (KOSPI / KRX)**.
+A quantitative sentiment ingestion and machine learning pipeline that forecasts next-period asset returns and prices ($n+1$) across the **Hong Kong Stock Exchange (Hang Seng / HKEX)** and the **Korea Exchange (KOSPI / KRX)**.
 
-The system fuses high-frequency retail social sentiment scraped via **Apify** with institutional financial news ingested via **Exa.com**, aligns feeds to UTC price bars, computes dynamic support/resistance zones, and evaluates predictive accuracy through walk-forward out-of-sample validation.
+The system ingests retail social sentiment from forum discussion boards via **Apify** and institutional financial news via **Exa.com**, aligns feeds to hourly UTC price bars, computes dynamic support/resistance zones, and evaluates predictive accuracy through walk-forward out-of-sample validation against naive persistence baselines.
 
 ---
 
@@ -11,41 +11,43 @@ The system fuses high-frequency retail social sentiment scraped via **Apify** wi
 ```
 hangseng_sentiment_pipeline/
 ├── config/
-│   ├── __init__.py
-│   └── settings.py              # Exchange definitions, tickers, API configs & fallback rules
+│   ├── settings.py              # Exchange definitions, tickers, Apify actor schemas & strict modes
+│   └── __init__.py
 ├── data/
-│   ├── market_data.py           # OHLCV price bar fetcher (yfinance, UTC normalized)
+│   ├── market_data.py           # Hourly OHLCV market bar fetcher (UTC normalized, session filtered)
 │   ├── scrapers/
-│   │   ├── apify_client.py      # Apify scraping actors (LIHKG, Futu/Moomoo, Naver, Daum)
+│   │   ├── apify_client.py      # Apify scraping actor pipelines (LIHKG, Futu, Naver, Daum)
 │   │   └── exa_news.py          # Exa.com neural search news ingestion
-│   ├── processor.py             # UTC bar alignment, feature fusion & lag engineering
-│   └── cache/                   # Parquet cache storage for price and sentiment feeds
+│   ├── processor.py             # UTC bar alignment, zero-lookahead feature fusion & lag engineering
+│   └── cache/                   # Parquet cache storage for historical price/sentiment
 ├── sentiment/
-│   ├── __init__.py
-│   ├── analyzer.py              # Multilingual financial domain lexicon (Cantonese/Korean/English)
-│   └── engagement_weighting.py  # Reach, virality & time-decay weighting engine
+│   ├── analyzer.py              # Multilingual domain lexicon (Cantonese/Korean/English) & position extractor
+│   ├── engagement_weighting.py  # Follower reach, viral engagement & time-decay weighting engine
+│   └── __init__.py
 ├── technical/
-│   ├── __init__.py
 │   ├── indicators.py            # RSI, MACD, Bollinger Bands, ATR & volume dynamics
-│   └── levels.py                # Support/Resistance pivots & position decision engine
+│   ├── levels.py                # Support/Resistance pivots, swing extrema & position decision engine
+│   └── __init__.py
 ├── models/
-│   ├── __init__.py
-│   ├── feature_engineering.py   # Feature selection and matrix formatting
-│   ├── validation.py            # Walk-forward TimeSeriesSplit out-of-sample validation
-│   └── predictor.py             # Blended XGBoost + L2 Ridge Regression model
+│   ├── feature_engineering.py   # Matrix formatting & zero-leakage feature selection
+│   ├── validation.py            # Walk-forward TimeSeriesSplit out-of-sample validation & baselines
+│   ├── predictor.py             # Blended XGBoost + L2 Ridge Regression model
+│   └── __init__.py
 ├── reporting/
-│   ├── __init__.py
 │   ├── summary_table.py         # Rich terminal tables sorted by mentions & sentiment
-│   └── visualizer.py            # Self-contained interactive HTML dashboard
+│   ├── visualizer.py            # Interactive HTML dashboard with data source badges
+│   ├── prediction_logger.py     # Parquet prediction logger and realization evaluator
+│   └── __init__.py
 ├── tests/
-│   └── test_pipeline.py         # Test suite covering scrapers, NLP, levels & models
+│   └── test_pipeline.py         # Test suite (normalization, no-leakage, baseline, regression)
 ├── reports/
 │   ├── sentiment_price_prediction_report.html  # Interactive visual report
-│   └── pipeline_summary.json                   # Machine-readable output summary
-├── app.py                       # Interactive Streamlit dashboard
+│   ├── pipeline_summary.json                   # Output summary
+│   └── predictions_log.parquet                 # Realized predictions log
+├── app.py                       # Streamlit dashboard
 ├── main.py                      # Orchestrator CLI entrypoint
-├── requirements.txt             # Project dependencies
-└── .env.example                 # Environment credentials template
+├── requirements.txt             # Production dependencies
+└── .env.example                 # Credentials template
 ```
 
 ---
@@ -54,74 +56,86 @@ hangseng_sentiment_pipeline/
 
 ### A. Data Ingestion & Cross-Exchange Coverage
 
-Per exchange, the pipeline ingests 5 core liquid benchmark assets across minimum 2 independent social channels plus institutional news:
+Per exchange, the pipeline monitors 5 core benchmark equities across 2 independent localized social channels plus institutional news:
 
-| Exchange | Tickers Ingested | Social Channel 1 | Social Channel 2 | Institutional News |
+| Exchange | Tickers | Social Source 1 | Social Source 2 | News Source |
 | :--- | :--- | :--- | :--- | :--- |
 | **HKEX (Hang Seng)** | `0700.HK`, `9988.HK`, `3690.HK`, `1810.HK`, `0005.HK` | **LIHKG** (Financial Channel) | **Futu / Moomoo** (Stock Community) | **Exa.com** (Reuters, Bloomberg, SCMP, HKEJ) |
 | **KRX (KOSPI)** | `005930.KS`, `000660.KS`, `035420.KS`, `035720.KS`, `005380.KS` | **Naver Finance** (종목토론실) | **Daum Finance** / Telegram Feeds | **Exa.com** (Bloomberg, Korea Times, KED Global) |
 
-### B. Engagement-Weighted Sentiment Formulation
+#### Apify Actor Configurations
 
-Raw social mentions are heavily susceptible to noise, retail spam, and bot activity. The pipeline computes an **Engagement-Weighted Sentiment Score** where each post $i$ is weighted by author authority (logarithmic follower reach), viral spread (likes, reposts, comments), and an exponential half-life time decay:
+| Social Channel | Apify Store Actor ID | Target URL Schema | Extraction Type |
+| :--- | :--- | :--- | :--- |
+| **LIHKG** | `apify/web-scraper` | `https://lihkg.com/category/5?page=1` | DOM cheerio / pageFunction |
+| **Futu / Moomoo** | `apify/puppeteer-scraper` | `https://www.moomoo.com/community/stock/{code}` | Headless Chromium evaluation |
+| **Naver Finance** | `apify/cheerio-scraper` | `https://finance.naver.com/item/board.naver?code={code}` | Table parser (종목토론실) |
+| **Daum Finance** | `apify/cheerio-scraper` | `https://finance.daum.net/quotes/A{code}#talks` | Forum feed cheerio |
+| **Telegram** | `vdrmmr/telegram-scraper` | `https://t.me/s/{channel}` | Public channel message extractor |
+
+### B. Strict No-Leakage Time Alignment Rule
+
+Each bar $k$ represents an interval $(t_{\text{close}, k-1}, t_{\text{close}, k}]$.
+A post or article published at timestamp $t$ is mapped to bar $k$ if and only if:
+
+$$t_{\text{close}, k-1} < t \le t_{\text{close}, k}$$
+
+Features calculated for bar $k$ use information available strictly at or before $t_{\text{close}, k}$.
+The target is the subsequent bar return:
+
+$$R_{k+1} = \frac{\text{Close}_{k+1} - \text{Close}_k}{\text{Close}_k}$$
+
+No future information enters the feature matrix of bar $k$. Warmup rows with missing indicator values are dropped rather than zero-filled.
+
+### C. Engagement-Weighted Sentiment Index
+
+Raw post counts are vulnerable to spam and noise. Each post $i$ is weighted by author authority (logarithmic follower scale), virality (likes, reposts, comments), and an exponential time decay ($\lambda = \ln(2) / t_{1/2}$, with $t_{1/2} = 3$ days):
 
 $$W_i = \ln(1 + \text{Followers}_i) \cdot \left(1.0 + 0.25 \ln(1 + \text{Likes}_i) + 0.45 \ln(1 + \text{Reposts}_i) + 0.10 \ln(1 + \text{Views}_i)\right) \cdot e^{-\lambda \cdot \Delta t}$$
 
 $$\bar{S}_{\text{weighted}} = \frac{\sum_{i=1}^{N} W_i \cdot S_i}{\sum_{i=1}^{N} W_i}$$
 
-Where:
-- $\Delta t$: Age of the post in seconds relative to bar close.
-- $\lambda = \frac{\ln(2)}{t_{1/2}}$: Half-life decay parameter ($t_{1/2} = 3$ days).
+### D. Retail vs. Smart Money Divergence (RSMD)
 
-### C. Retail vs. Smart Money Divergence (RSMD)
-
-To avoid buying into exhaustion tops or selling into capitulation lows, the pipeline computes the sentiment delta between retail crowds (Apify social channels) and institutional coverage (Exa news):
+Quantifies the spread between retail crowd sentiment and institutional reporting:
 
 $$\Delta_{\text{RSMD}} = \bar{S}_{\text{weighted}} - \bar{S}_{\text{news}}$$
 
-- **Overbought Distribution Trap ($\Delta_{\text{RSMD}} > +0.40$):** Extreme retail euphoria while institutional news is neutral or negative, especially near Resistance $R_1$.
-- **Capitulation Accumulation Zone ($\Delta_{\text{RSMD}} < -0.40$):** Retail panic while institutional fundamentals remain solid, particularly around Support $S_1$.
+- **Overbought Distribution Trap ($\Delta_{\text{RSMD}} > +0.40$):** Retail euphoria while institutional news is neutral or negative, especially near Resistance $R_1$.
+- **Capitulation Accumulation Zone ($\Delta_{\text{RSMD}} < -0.40$):** Retail panic while institutional fundamentals remain stable near Support $S_1$.
 
-### D. Support & Resistance Formulations
+### E. Support & Resistance Levels
 
-The technical engine calculates classical Floor Pivots and Fibonacci extensions over the lookback window:
+Computes classical floor pivots, Fibonacci pivots, and local swing extrema:
 
-$$PP = \frac{\text{High} + \text{Low} + \text{Close}}{3}$$
+$$PP = \frac{\text{High} + \text{Low} + \text{Close}}{3}, \quad R_1 = 2 \cdot PP - \text{Low}, \quad S_1 = 2 \cdot PP - \text{High}$$
 
-$$R_1 = 2 \cdot PP - \text{Low}, \quad S_1 = 2 \cdot PP - \text{High}$$
+$$\text{Swing High} = \max_{t \in [T-10, T]} \text{High}_t, \quad \text{Swing Low} = \min_{t \in [T-10, T]} \text{Low}_t$$
 
-$$R_2 = PP + (\text{High} - \text{Low}), \quad S_2 = PP - (\text{High} - \text{Low})$$
+The pipeline also parses specific price levels directly mentioned in forum text (e.g., target prices, stop bounds).
 
-$$R_{\text{Fib}} = PP + 0.618 \cdot (\text{High} - \text{Low}), \quad S_{\text{Fib}} = PP - 0.618 \cdot (\text{High} - \text{Low})$$
+### F. Stated Retail Position vs. Suggested Stance
 
-### E. Predictive Modeling at $n+1$
+- **Stated Position**: Extracted directly from retail post text via regex matching phrases like `買入`, `long`, `물렸다`, `손절`, `매수`, `숏`.
+- **Suggested Stance**: The model's risk-adjusted recommendation (`LONG`, `SHORT`, `NEUTRAL`) combining sentiment polarity, divergence, and technical pivot levels.
 
-The target variable is the next period return $R_{t+1}$:
+### G. Predictive Modeling & Walk-Forward Validation
 
-$$R_{t+1} = \frac{P_{t+1} - P_t}{P_t}$$
-
-The model blends **Gradient Boosted Trees (XGBoost)** and **L2 Regularized Ridge Regression**:
-
-$$\hat{R}_{t+1} = 0.65 \cdot \hat{R}_{\text{XGB}} + 0.35 \cdot \hat{R}_{\text{Ridge}}$$
-
-$$\hat{P}_{n+1} = P_n \cdot (1 + \hat{R}_{t+1})$$
-
-Prediction intervals are constructed using the normalized 14-period Average True Range ($ATR_{14}$):
-
-$$\text{Bounds}_{n+1} = \hat{P}_{n+1} \pm (P_n \cdot ATR_{\text{norm}} \cdot 0.8)$$
+- **Models**: Scikit-Learn `Pipeline(StandardScaler(), Ridge(alpha=1.0))` and `XGBRegressor`.
+- **Validation**: Strict `TimeSeriesSplit(gap=1)` walk-forward cross validation. Requires minimum 40 training bars and 15 test bars per fold; otherwise reports `insufficient_data` and returns `None` for metrics.
+- **Benchmarking**: Compares model accuracy against a naive persistence baseline ($\text{sign}(\hat{R}_{t+1}) = \text{sign}(R_t)$) and reports lift.
+- **Statistical Tests**: Binomial test p-values ($H_0: p=0.50$) and 95% Wilson confidence intervals.
+- **Sharpe Ratio**: Computed only when $n_{\text{test}} \ge 100$; otherwise suppressed as `None` to prevent spurious small-sample claims.
 
 ---
 
-## 3. Out-of-Sample Walk-Forward Validation
+## 3. Results & Limitations
 
-To ensure realistic estimates and prevent lookahead bias:
-1. Historical samples are split chronologically using `TimeSeriesSplit(n_splits=3)`.
-2. All feature transformations and lag attributes ($X_{t-1}$) are calculated strictly up to the training timestamp.
-3. Evaluated metrics include:
-   - **Directional Accuracy / Hit Ratio**: $\frac{1}{M} \sum \mathbb{I}(\text{sign}(\hat{R}_{t+1}) == \text{sign}(R_{t+1}))$
-   - **Root Mean Squared Error (RMSE)**
-   - **Mean Absolute Error (MAE)**
-   - **Walk-Forward Strategy Sharpe Ratio & Cumulative Return**
+### Honest Assessment of Edge and Statistical Significance
+
+1. **Sample Size Limitations**: In short lookback windows (e.g., 10 days of hourly bars), out-of-sample test samples range between 40 and 80 bars per asset. While directional accuracies of 50–55% are observed, high binomial p-values ($p > 0.05$) indicate that short-window directional lifts cannot be definitively distinguished from random chance without expanding to multi-month horizons.
+2. **Persistence Baseline**: Financial asset returns exhibit negative autocorrelation at hourly frequencies during consolidation. Comparing against a naive persistence baseline reveals that raw hit rates near 50% often yield marginal net lift ($\pm 2\text{--}5\%$).
+3. **Synthetic Mode Warning**: Simulation is **OFF by default**. If run with `--allow-simulation`, synthetic data is generated uniformly at random ($p = 0.33$ bull, bear, neut) without ticker bias, and all outputs are prominently labeled `⚠️ SIMULATED DATA WARNING`.
 
 ---
 
@@ -129,17 +143,17 @@ To ensure realistic estimates and prevent lookahead bias:
 
 ### Prerequisites
 
-Ensure Python 3.10+ is installed.
+Python 3.10+ is required.
 
 ```bash
-git clone <repo_url>
-cd hangseng_sentiment_pipeline
+git clone https://github.com/bhardwajarpit888-hash/hangseng-sentiment-pipeline.git
+cd hangseng-sentiment-pipeline
 pip install -r requirements.txt
 ```
 
 ### Environment Configuration
 
-Copy `.env.example` to `.env` and insert your credentials:
+Copy `.env.example` to `.env` and configure your API tokens:
 
 ```bash
 cp .env.example .env
@@ -149,58 +163,38 @@ cp .env.example .env
 APIFY_API_TOKEN=your_apify_api_token
 EXA_API_KEY=your_exa_api_key
 LOOKBACK_DAYS=10
+INTERVAL=1h
 ```
 
-*(Note: The system contains high-fidelity fallback generators for testing offline or when API tokens are not provided, allowing immediate end-to-end evaluation out of the box).*
-
-### Running the Pipeline
-
-To run the complete pipeline across both exchanges:
+### Running the Pipeline (Live Mode)
 
 ```bash
-python main.py --exchange ALL --lookback 10
+python main.py --exchange ALL --lookback 10 --interval 1h
 ```
 
-To run specifically for Hang Seng / HKEX:
+If API tokens are not provided, the pipeline halts with an informative error. To run offline with synthetic fallback feeds, pass:
 
 ```bash
-python main.py --exchange HKEX --lookback 10
+python main.py --exchange ALL --lookback 10 --interval 1h --allow-simulation
 ```
 
-### Launching the Interactive Web Dashboard
+### Realized Prediction Evaluation
 
-To launch the real-time visual dashboard:
+Once subsequent market bars have printed, evaluate logged predictions against realized prices:
+
+```bash
+python main.py --evaluate
+```
+
+### Interactive Web Dashboard
 
 ```bash
 streamlit run app.py
 ```
 
-### Viewing the Static HTML Report
-
-The pipeline automatically outputs an interactive HTML report to:
-`reports/sentiment_price_prediction_report.html`
-
-Open it directly in any modern browser to view the visual charts and rankings.
-
-### Running Unit Tests
+### Running the Test Suite
 
 ```bash
 python -m unittest discover tests
 ```
-
----
-
-## 5. Sample Output & Asset Ranking
-
-```
-=== HKEX Market Intelligence & Sentiment Summary (Sorted by Mentions) ===
-┌──────────┬──────────────────────┬─────────┬──────────┬───────────┬──────────┬──────────┬────────────┬────────────┬─────────────┬─────────┐
-│ Ticker   │ Asset Name           │ Price   │ Mentions │ Sentiment │ Direct.  │ Position │ S1 (Supp)  │ R1 (Res)   │ Target n+1  │ OOS Acc │
-├──────────┼──────────────────────┼─────────┼──────────┼───────────┼──────────┼──────────┼────────────┼────────────┼─────────────┼─────────┤
-│ 1810.HK  │ Xiaomi Corporation   │ 29.70   │ 80       │ +0.33     │ BULLISH  │ LONG     │ 27.63      │ 31.75      │ 30.33       │ 66.7%   │
-│ 0005.HK  │ HSBC Holdings plc    │ 138.50  │ 80       │ +0.31     │ BULLISH  │ LONG     │ 132.90     │ 143.70     │ 137.69      │ 46.7%   │
-│ 0700.HK  │ Tencent Holdings Ltd │ 376.00  │ 80       │ +0.25     │ BULLISH  │ LONG     │ 357.60     │ 412.80     │ 374.58      │ 53.3%   │
-│ 3690.HK  │ Meituan              │ 70.50   │ 80       │ +0.25     │ BULLISH  │ LONG     │ 65.50      │ 79.25      │ 70.85       │ 46.7%   │
-│ 9988.HK  │ Alibaba Group        │ 85.45   │ 80       │ +0.10     │ NEUTRAL  │ NEUTRAL  │ 77.23      │ 101.53     │ 84.04       │ 46.7%   │
-└──────────┴──────────────────────┴─────────┴──────────┴───────────┴──────────┴──────────┴────────────┴────────────┴─────────────┴─────────┘
-```
+*(All 6 unit tests covering normalization, zero-leakage, baseline comparison, and regression assertions pass).*

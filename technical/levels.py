@@ -1,29 +1,34 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List, Optional
 
 
 class SupportResistanceEngine:
     """
-    Computes key market levels including Classic Floor Pivots, Fibonacci Pivots,
-    local swing extrema, and ATR volatility boundaries.
+    Computes key market levels:
+    1. Classical Floor Pivots (PP, S1, R1, S2, R2)
+    2. Fibonacci Pivots (0.618 extensions)
+    3. Swing High / Swing Low (local extrema price rejections)
+    4. ATR Volatility Bands
     """
 
-    def calculate_levels(self, df: pd.DataFrame) -> Dict[str, float]:
+    def calculate_levels(self, df: pd.DataFrame, post_mentioned: Optional[List[float]] = None) -> Dict[str, Any]:
         if df.empty or len(df) < 2:
             return {
                 "pivot": 0.0, "s1": 0.0, "s2": 0.0, "s3": 0.0,
                 "r1": 0.0, "r2": 0.0, "r3": 0.0,
                 "fib_s618": 0.0, "fib_r618": 0.0,
+                "swing_high": 0.0, "swing_low": 0.0,
+                "post_mentioned_levels": post_mentioned or [],
                 "atr": 0.0
             }
 
-        recent_bars = df.tail(10)
+        recent_bars = df.tail(min(30, len(df)))
         high = float(recent_bars["high"].max())
         low = float(recent_bars["low"].min())
         close = float(recent_bars["close"].iloc[-1])
 
-        # Classical Pivot Points
+        # Classical Floor Pivots
         pp = (high + low + close) / 3.0
         r1 = (2.0 * pp) - low
         s1 = (2.0 * pp) - high
@@ -33,16 +38,22 @@ class SupportResistanceEngine:
         s3 = low - 2.0 * (high - pp)
 
         # Fibonacci Pivots
-        range_hl = high - low
+        range_hl = max(1e-6, high - low)
         fib_r618 = pp + (0.618 * range_hl)
         fib_s618 = pp - (0.618 * range_hl)
 
-        # ATR computation
+        # Swing Extrema: local highs and lows over rolling window
+        swing_window = min(10, len(df))
+        swing_high = float(df["high"].tail(swing_window).max())
+        swing_low = float(df["low"].tail(swing_window).min())
+
+        # Average True Range (14-period or available history)
         tr1 = df["high"] - df["low"]
         tr2 = (df["high"] - df["close"].shift(1)).abs()
         tr3 = (df["low"] - df["close"].shift(1)).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = float(tr.tail(10).mean()) if len(tr) > 0 else (high - low) * 0.1
+        atr_window = min(14, len(tr))
+        atr = float(tr.tail(atr_window).mean()) if len(tr) > 0 else (high - low) * 0.05
 
         return {
             "pivot": round(pp, 2),
@@ -54,16 +65,19 @@ class SupportResistanceEngine:
             "r3": round(r3, 2),
             "fib_s618": round(fib_s618, 2),
             "fib_r618": round(fib_r618, 2),
+            "swing_high": round(swing_high, 2),
+            "swing_low": round(swing_low, 2),
+            "post_mentioned_levels": post_mentioned or [],
             "atr": round(atr, 2),
-            "high_10d": round(high, 2),
-            "low_10d": round(low, 2),
+            "lookback_high": round(high, 2),
+            "lookback_low": round(low, 2),
         }
 
 
 class PositionRecommendationEngine:
     """
-    Synthesizes multi-source sentiment with technical support/resistance levels
-    to generate actionable risk-managed position recommendations.
+    Separates stated retail positions (extracted from post text)
+    from suggested quantitative model stance (derived from risk/reward, pivots & sentiment).
     """
 
     def __init__(self):
@@ -79,62 +93,63 @@ class PositionRecommendationEngine:
             return {}
 
         current_price = float(price_df["close"].iloc[-1])
-        levels = self.levels_calc.calculate_levels(price_df)
+        post_levels = sentiment_metrics.get("post_mentioned_levels", [])
+        levels = self.levels_calc.calculate_levels(price_df, post_mentioned=post_levels)
 
         sentiment_score = sentiment_metrics.get("composite_sentiment", 0.0)
         direction = sentiment_metrics.get("sentiment_direction", "NEUTRAL")
         divergence = sentiment_metrics.get("retail_smart_divergence", 0.0)
         atr = levels["atr"]
 
-        # 5-day and 10-day trend
-        ma5 = float(price_df["close"].tail(5).mean()) if len(price_df) >= 5 else current_price
-        trend_bullish = current_price >= ma5
+        # Retail crowd's stated position
+        stated_pos = sentiment_metrics.get("dominant_stated_position", "NONE")
+        stated_counts = sentiment_metrics.get("stated_position_counts", {"long": 0, "short": 0, "flat": 0})
 
-        # Position sizing logic
-        position = "NEUTRAL"
+        # Moving average trend check
+        ma_window = min(20, len(price_df))
+        ma_trend = float(price_df["close"].tail(ma_window).mean()) if len(price_df) >= 3 else current_price
+        trend_bullish = current_price >= ma_trend
+
+        # Quantitative suggested stance
+        suggested_stance = "NEUTRAL"
         confidence = "MEDIUM"
         size = 0.0
         rationale = ""
 
-        # Bullish setup: Positive sentiment supported by technical structure
-        if direction == "BULLISH" and sentiment_score > 0.15:
-            if divergence > 0.45 and current_price >= levels["r1"]:
-                # Retail euphoria trap near resistance
-                position = "NEUTRAL"
+        if direction == "BULLISH" and sentiment_score > 0.12:
+            if divergence > 0.40 and current_price >= levels["r1"]:
+                suggested_stance = "NEUTRAL"
                 confidence = "LOW"
-                rationale = "Extreme retail hype divergence near resistance level R1; potential exhaustion trap. Advise waiting for pullback."
+                rationale = "Extreme retail hype divergence near resistance R1; distribution exhaustion risk. Maintain neutral stance."
             else:
-                position = "LONG"
-                size = 1.0 if sentiment_score > 0.35 and trend_bullish else 0.5
-                confidence = "HIGH" if sentiment_score > 0.35 else "MEDIUM"
-                rationale = f"Strong multi-source sentiment (+{sentiment_score:.2f}) aligning with price consolidating above pivot {levels['pivot']}."
+                suggested_stance = "LONG"
+                size = 1.0 if sentiment_score > 0.30 and trend_bullish else 0.5
+                confidence = "HIGH" if sentiment_score > 0.30 else "MEDIUM"
+                rationale = f"Composite sentiment (+{sentiment_score:.2f}) aligning above pivot {levels['pivot']}."
 
-        # Bearish setup: Negative sentiment breaking support
-        elif direction == "BEARISH" and sentiment_score < -0.15:
-            if divergence < -0.45 and current_price <= levels["s1"]:
-                # Extreme retail panic near support - potential contrarian bounce
-                position = "NEUTRAL"
+        elif direction == "BEARISH" and sentiment_score < -0.12:
+            if divergence < -0.40 and current_price <= levels["s1"]:
+                suggested_stance = "NEUTRAL"
                 confidence = "LOW"
-                rationale = "Severe retail capitulation at support level S1; high likelihood of short-squeeze bounce. Sideline until confirmation."
+                rationale = "Capitulation divergence near support S1; potential short-squeeze bounce. Advise neutral."
             else:
-                position = "SHORT"
-                size = 1.0 if sentiment_score < -0.35 and not trend_bullish else 0.5
-                confidence = "HIGH" if sentiment_score < -0.35 else "MEDIUM"
-                rationale = f"Negative sentiment inflection ({sentiment_score:.2f}) coupled with overhead pressure below pivot {levels['pivot']}."
-
+                suggested_stance = "SHORT"
+                size = 1.0 if sentiment_score < -0.30 and not trend_bullish else 0.5
+                confidence = "HIGH" if sentiment_score < -0.30 else "MEDIUM"
+                rationale = f"Bearish sentiment pressure ({sentiment_score:.2f}) below pivot {levels['pivot']}."
         else:
-            position = "NEUTRAL"
+            suggested_stance = "NEUTRAL"
             size = 0.0
             confidence = "LOW"
-            rationale = "Balanced sentiment signals and price trading within historical pivot bounds."
+            rationale = "Neutral sentiment bounds and price consolidating within pivot range."
 
         # Risk parameters
-        if position == "LONG":
-            tp = round(max(levels["r1"], current_price + 1.5 * atr), 2)
+        if suggested_stance == "LONG":
+            tp = round(max(levels["r1"], levels["swing_high"], current_price + 1.5 * atr), 2)
             sl = round(min(levels["s1"], current_price - 1.0 * atr), 2)
             rr = round((tp - current_price) / max(0.01, (current_price - sl)), 2)
-        elif position == "SHORT":
-            tp = round(min(levels["s1"], current_price - 1.5 * atr), 2)
+        elif suggested_stance == "SHORT":
+            tp = round(min(levels["s1"], levels["swing_low"], current_price - 1.5 * atr), 2)
             sl = round(max(levels["r1"], current_price + 1.0 * atr), 2)
             rr = round((current_price - tp) / max(0.01, (sl - current_price)), 2)
         else:
@@ -144,7 +159,10 @@ class PositionRecommendationEngine:
 
         return {
             "current_price": current_price,
-            "position": position,
+            "suggested_stance": suggested_stance,
+            "stated_position": stated_pos,
+            "stated_position_counts": stated_counts,
+            "position": suggested_stance,  # backward compatibility alias
             "position_size": size,
             "confidence": confidence,
             "take_profit": tp,

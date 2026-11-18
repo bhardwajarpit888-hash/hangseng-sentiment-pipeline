@@ -12,9 +12,11 @@ logger = logging.getLogger(__name__)
 
 class VisualReportGenerator:
     """
-    Generates a publication-grade interactive visual HTML dashboard
-    ranking assets by social mentions, sentiment score, and directional bias,
-    complete with technical support/resistance levels and n+1 predictive forecasts.
+    Generates an interactive visual HTML dashboard ranking assets by social mentions,
+    composite sentiment score, and directional bias.
+    Includes data_source verification badges, out-of-sample sample sizes (n_test),
+    naive-baseline comparisons, statistical significance warnings,
+    and empirical interval coverage metrics.
     """
 
     def __init__(self, output_dir: Path = REPORTS_DIR):
@@ -26,7 +28,7 @@ class VisualReportGenerator:
         report_path = self.output_dir / "sentiment_price_prediction_report.html"
         json_path = self.output_dir / "pipeline_summary.json"
 
-        # Export JSON summary for programmatic integration
+        # Export JSON summary
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump({
                 "generated_at": timestamp_str,
@@ -34,7 +36,12 @@ class VisualReportGenerator:
                 "summary": summary_df.to_dict(orient="records")
             }, f, indent=2)
 
-        # Build Exchange Tables HTML
+        # Check for simulated records
+        is_simulated = any(r.get("data_source") == "simulated" for r in summary_df.to_dict(orient="records"))
+        banner_class = "banner-simulated" if is_simulated else "banner-live"
+        banner_text = "⚠️ SIMULATED DATA WARNING: Fallback synthetic feeds were permitted via --allow-simulation." if is_simulated else "✓ VERIFIED LIVE DATA: Market feeds ingested live via Yahoo Finance, Apify & Exa."
+
+        # Separate exchanges
         hkex_df = summary_df[summary_df["exchange"] == "HKEX"].sort_values(
             by=["social_mentions", "composite_sentiment"], ascending=[False, False]
         )
@@ -45,7 +52,7 @@ class VisualReportGenerator:
         hkex_rows = self._render_table_rows(hkex_df)
         krx_rows = self._render_table_rows(krx_df)
 
-        # Chart datasets (JSON serialized for Chart.js)
+        # Chart payloads
         mentions_chart_data = {
             "labels": summary_df["symbol"].tolist(),
             "data": summary_df["social_mentions"].tolist(),
@@ -54,14 +61,18 @@ class VisualReportGenerator:
 
         sentiment_chart_data = {
             "labels": summary_df["symbol"].tolist(),
-            "social": summary_df["weighted_sentiment"].tolist(),
-            "news": summary_df["news_sentiment"].tolist(),
-            "composite": summary_df["composite_sentiment"].tolist()
+            "social": [float(x) for x in summary_df["weighted_sentiment"]],
+            "news": [float(x) for x in summary_df["news_sentiment"]],
+            "composite": [float(x) for x in summary_df["composite_sentiment"]]
         }
 
-        # Out-of-sample validation averages
-        avg_accuracy = summary_df["oos_accuracy"].mean() * 100
-        avg_sharpe = summary_df["sharpe"].mean()
+        # Calculate valid metrics without inventing values
+        valid_accuracies = summary_df["oos_accuracy"].dropna()
+        avg_accuracy_str = f"{valid_accuracies.mean() * 100:.1f}%" if not valid_accuracies.empty else "Insufficient Data"
+
+        valid_lifts = summary_df["accuracy_lift"].dropna()
+        avg_lift_str = f"{valid_lifts.mean() * 100:+.1f}%" if not valid_lifts.empty else "N/A"
+
         total_mentions = summary_df["social_mentions"].sum()
         bullish_count = len(summary_df[summary_df["direction"] == "BULLISH"])
         bearish_count = len(summary_df[summary_df["direction"] == "BEARISH"])
@@ -71,13 +82,12 @@ class VisualReportGenerator:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Source Sentiment & n+1 Price Prediction Pipeline</title>
+    <title>Cross-Exchange Sentiment & n+1 Forecast Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {{
             --bg-primary: #0f172a;
             --bg-secondary: #1e293b;
-            --bg-card: #1e293b;
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
             --accent-green: #10b981;
@@ -90,7 +100,7 @@ class VisualReportGenerator:
         body {{
             background-color: var(--bg-primary);
             color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             padding: 24px;
             line-height: 1.5;
         }}
@@ -100,19 +110,19 @@ class VisualReportGenerator:
             align-items: center;
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 20px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }}
-        .header h1 {{ font-size: 26px; font-weight: 700; color: #fff; }}
-        .header .subtitle {{ color: var(--text-secondary); font-size: 14px; margin-top: 4px; }}
-        .badge-live {{
-            background: rgba(16, 185, 129, 0.2);
-            color: var(--accent-green);
-            padding: 6px 12px;
-            border-radius: 9999px;
-            font-size: 12px;
+        .header h1 {{ font-size: 24px; font-weight: 700; color: #fff; }}
+        .header .subtitle {{ color: var(--text-secondary); font-size: 13px; margin-top: 4px; }}
+        .banner {{
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
             font-weight: 600;
-            border: 1px solid rgba(16, 185, 129, 0.4);
+            margin-bottom: 20px;
         }}
+        .banner-live {{ background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
+        .banner-simulated {{ background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
         .stats-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -125,16 +135,13 @@ class VisualReportGenerator:
             border-radius: 10px;
             padding: 16px 20px;
         }}
-        .stat-card .label {{ color: var(--text-secondary); font-size: 13px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }}
-        .stat-card .value {{ font-size: 28px; font-weight: 700; margin-top: 6px; }}
+        .stat-card .label {{ color: var(--text-secondary); font-size: 12px; text-transform: uppercase; font-weight: 600; }}
+        .stat-card .value {{ font-size: 26px; font-weight: 700; margin-top: 6px; }}
         .section-title {{
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            margin: 28px 0 14px 0;
+            margin: 24px 0 12px 0;
             color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }}
         .card {{
             background: var(--bg-secondary);
@@ -154,28 +161,27 @@ class VisualReportGenerator:
             width: 100%;
             border-collapse: collapse;
             text-align: left;
-            font-size: 13px;
+            font-size: 12px;
         }}
         th {{
             background: #0f172a;
             color: var(--text-secondary);
-            padding: 12px 14px;
+            padding: 10px 12px;
             font-weight: 600;
             text-transform: uppercase;
             font-size: 11px;
-            letter-spacing: 0.5px;
             border-bottom: 1px solid var(--border-color);
         }}
         td {{
-            padding: 12px 14px;
+            padding: 10px 12px;
             border-bottom: 1px solid var(--border-color);
             color: var(--text-primary);
         }}
         tr:hover td {{ background: rgba(255, 255, 255, 0.02); }}
         .pill {{
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 11px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 10px;
             font-weight: 600;
             display: inline-block;
         }}
@@ -184,61 +190,63 @@ class VisualReportGenerator:
         .pill-neut {{ background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.4); }}
         .text-green {{ color: var(--accent-green); font-weight: 600; }}
         .text-red {{ color: var(--accent-red); font-weight: 600; }}
-        .text-yellow {{ color: var(--accent-amber); font-weight: 600; }}
         .methodology-box {{
             background: #111827;
             border-left: 4px solid var(--accent-blue);
             padding: 16px 20px;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 12px;
             color: #cbd5e1;
             margin-top: 24px;
         }}
-        .methodology-box h4 {{ color: #fff; margin-bottom: 6px; font-size: 14px; }}
+        .methodology-box h4 {{ color: #fff; margin-bottom: 6px; font-size: 13px; }}
     </style>
 </head>
 <body>
 
     <div class="header">
         <div>
-            <h1>Cross-Exchange Sentiment & n+1 Price Forecast System</h1>
-            <div class="subtitle">Multi-Source Alternative Data Pipeline (Apify Scrapers & Exa News Ingestion) | Generated: {timestamp_str}</div>
+            <h1>Cross-Exchange Sentiment & n+1 Forecast Pipeline</h1>
+            <div class="subtitle">Hong Kong Stock Exchange (Hang Seng) & Korea Exchange (KOSPI) | Aligned UTC Runs | {timestamp_str}</div>
         </div>
-        <div class="badge-live">UTC ALIGNED PIPELINE</div>
+    </div>
+
+    <div class="banner {banner_class}">
+        {banner_text}
     </div>
 
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="label">Total Social Posts Scraped</div>
+            <div class="label">Total Social Posts Analyzed</div>
             <div class="value" style="color: var(--accent-blue);">{total_mentions:,}</div>
         </div>
         <div class="stat-card">
-            <div class="label">OOS Directional Accuracy</div>
-            <div class="value text-green">{avg_accuracy:.1f}%</div>
+            <div class="label">Avg OOS Directional Accuracy</div>
+            <div class="value text-green">{avg_accuracy_str}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Walk-Forward Sharpe Ratio</div>
-            <div class="value" style="color: #a855f7;">{avg_sharpe:.2f}</div>
+            <div class="label">Avg Lift vs Naive Baseline</div>
+            <div class="value" style="color: #a855f7;">{avg_lift_str}</div>
         </div>
         <div class="stat-card">
-            <div class="label">Market Sentiment Breadth</div>
+            <div class="label">Sentiment Breadth</div>
             <div class="value"><span class="text-green">{bullish_count} Bull</span> / <span class="text-red">{bearish_count} Bear</span></div>
         </div>
     </div>
 
     <div class="charts-container">
         <div class="card">
-            <h3 style="font-size: 15px; margin-bottom: 12px;">Social Discussion Volume by Asset (10-Day Window)</h3>
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Social Mention Volume by Asset (Lookback Window)</h3>
             <canvas id="mentionsChart" height="150"></canvas>
         </div>
         <div class="card">
-            <h3 style="font-size: 15px; margin-bottom: 12px;">Sentiment Polarity: Retail Social vs. Exa Institutional News</h3>
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Sentiment Polarity: Retail Social vs Exa Institutional News</h3>
             <canvas id="sentimentChart" height="150"></canvas>
         </div>
     </div>
 
     <div class="section-title">
-        <span>🇭🇰 Hong Kong Stock Exchange (Hang Seng) - Ranked by Social Mentions & Sentiment</span>
+        <span>🇭🇰 Hong Kong Stock Exchange (Hang Seng) - Ranked by Mentions & Sentiment</span>
     </div>
     <div class="card">
         <table>
@@ -246,18 +254,21 @@ class VisualReportGenerator:
                 <tr>
                     <th>Ticker</th>
                     <th>Asset Name</th>
-                    <th>Current Price</th>
+                    <th>Price</th>
                     <th>Mentions</th>
                     <th>Social Sent.</th>
                     <th>News Sent.</th>
                     <th>Composite</th>
                     <th>Direction</th>
-                    <th>Position</th>
+                    <th>Stated Pos</th>
+                    <th>Stance</th>
                     <th>Support (S1)</th>
+                    <th>Swing Low</th>
                     <th>Pivot</th>
                     <th>Resistance (R1)</th>
-                    <th>Predicted (n+1)</th>
-                    <th>OOS Hit%</th>
+                    <th>Target n+1</th>
+                    <th>OOS Acc (n)</th>
+                    <th>Lift vs Base</th>
                 </tr>
             </thead>
             <tbody>
@@ -267,7 +278,7 @@ class VisualReportGenerator:
     </div>
 
     <div class="section-title">
-        <span>🇰🇷 Korea Stock Exchange (KRX / KOSPI) - Ranked by Social Mentions & Sentiment</span>
+        <span>🇰🇷 Korea Stock Exchange (KRX / KOSPI) - Ranked by Mentions & Sentiment</span>
     </div>
     <div class="card">
         <table>
@@ -275,18 +286,21 @@ class VisualReportGenerator:
                 <tr>
                     <th>Ticker</th>
                     <th>Asset Name</th>
-                    <th>Current Price</th>
+                    <th>Price</th>
                     <th>Mentions</th>
                     <th>Social Sent.</th>
                     <th>News Sent.</th>
                     <th>Composite</th>
                     <th>Direction</th>
-                    <th>Position</th>
+                    <th>Stated Pos</th>
+                    <th>Stance</th>
                     <th>Support (S1)</th>
+                    <th>Swing Low</th>
                     <th>Pivot</th>
                     <th>Resistance (R1)</th>
-                    <th>Predicted (n+1)</th>
-                    <th>OOS Hit%</th>
+                    <th>Target n+1</th>
+                    <th>OOS Acc (n)</th>
+                    <th>Lift vs Base</th>
                 </tr>
             </thead>
             <tbody>
@@ -296,11 +310,11 @@ class VisualReportGenerator:
     </div>
 
     <div class="methodology-box">
-        <h4>Methodology & Quantitative Model Architecture:</h4>
-        <p><strong>1. Data Ingestion:</strong> Multi-source ingestion capturing retail community forums (LIHKG, Futu/Moomoo, Naver Finance, Daum Finance) via Apify actors and institutional news via Exa.com neural search across top financial outlets.</p>
-        <p><strong>2. Engagement-Weighted Sentiment Index:</strong> Weights posts by author reach (logarithmic follower scale), virality (likes, reposts, comments), and exponential time decay (half-life of 3 days).</p>
-        <p><strong>3. Retail vs Institutional Divergence (RSMD):</strong> Computes sentiment delta between retail crowds and institutional coverage to identify potential retail trap distributions near resistance and capitulation accumulation near support.</p>
-        <p><strong>4. Out-of-Sample Walk-Forward Validation:</strong> Machine learning forecasts (blended XGBoost + L2 Ridge Regression) are evaluated strictly on out-of-sample forward folds with zero lookahead bias.</p>
+        <h4>Methodology, Baseline Comparisons & Limitations:</h4>
+        <p><strong>1. Strict No-Leakage Time Alignment:</strong> Features for predicting bar t+1 are calculated using market and alternative data available strictly at or before the close of bar t.</p>
+        <p><strong>2. Naive Baseline & Statistical Tests:</strong> Model accuracy is benchmarked against a naive persistence baseline (sign of preceding bar return). Binomial p-values are computed to evaluate whether directional accuracy exceeds 50% significantly.</p>
+        <p><strong>3. Position Tracking:</strong> Stated positions reflect retail traders' self-reported holdings in forum discourse. The suggested stance is the quantitative model's risk-adjusted recommendation.</p>
+        <p><strong>4. Verification & Audit:</strong> If run with `--allow-simulation`, synthetic data is tagged and marked across all records and charts.</p>
     </div>
 
     <script>
@@ -379,17 +393,28 @@ class VisualReportGenerator:
                 else ('<span class="pill pill-bear">BEARISH</span>' if r["direction"] == "BEARISH"
                 else '<span class="pill pill-neut">NEUTRAL</span>')
             )
-            pos_pill = (
-                f'<span class="text-green" style="font-weight:700;">{r["position"]}</span>' if r["position"] == "LONG"
-                else (f'<span class="text-red" style="font-weight:700;">{r["position"]}</span>' if r["position"] == "SHORT"
+            stance_pill = (
+                f'<span class="text-green" style="font-weight:700;">{r["suggested_stance"]}</span>' if r["suggested_stance"] == "LONG"
+                else (f'<span class="text-red" style="font-weight:700;">{r["suggested_stance"]}</span>' if r["suggested_stance"] == "SHORT"
                 else '<span style="color:#64748b;">NEUTRAL</span>')
             )
 
             p_n1 = r["pred_price_n1"]
             curr = r["current_price"]
-            diff_pct = ((p_n1 - curr) / curr) * 100
+            diff_pct = ((p_n1 - curr) / curr) * 100 if curr > 0 else 0.0
             diff_str = f"+{diff_pct:.2f}%" if diff_pct >= 0 else f"{diff_pct:.2f}%"
             diff_color = "text-green" if diff_pct >= 0 else "text-red"
+
+            # OOS accuracy & lift
+            if r["oos_accuracy"] is not None:
+                sig_star = " *" if r["statistically_significant"] else ""
+                oos_str = f"{r['oos_accuracy']*100:.1f}% ({r['n_test']}){sig_star}"
+                lift_val = r["accuracy_lift"]
+                lift_color = "text-green" if (lift_val or 0) > 0 else "text-red"
+                lift_str = f'<span class="{lift_color}">{lift_val*100:+.1f}%</span>' if lift_val is not None else "N/A"
+            else:
+                oos_str = '<span style="color:#64748b;">Insuff. Data</span>'
+                lift_str = '<span style="color:#64748b;">N/A</span>'
 
             rows.append(f"""
             <tr>
@@ -401,12 +426,15 @@ class VisualReportGenerator:
                 <td>{r["news_sentiment"]:+.2f}</td>
                 <td style="font-weight:600;">{r["composite_sentiment"]:+.2f}</td>
                 <td>{dir_pill}</td>
-                <td>{pos_pill}</td>
+                <td style="color:#94a3b8;">{r["stated_position"]}</td>
+                <td>{stance_pill}</td>
                 <td class="text-green">{r["support_s1"]:,.2f}</td>
+                <td style="color:#cbd5e1;">{r["swing_low"]:,.2f}</td>
                 <td style="color:#94a3b8;">{r["pivot"]:,.2f}</td>
                 <td class="text-red">{r["resistance_r1"]:,.2f}</td>
                 <td><strong>{p_n1:,.2f}</strong> <span class="{diff_color}" style="font-size:11px;">({diff_str})</span></td>
-                <td>{r["oos_accuracy"]*100:.1f}%</td>
+                <td>{oos_str}</td>
+                <td>{lift_str}</td>
             </tr>
             """)
         return "\n".join(rows)

@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 import numpy as np
 
@@ -15,11 +15,19 @@ class DataAlignmentProcessor:
     """
     Aligns asynchronous unstructured social feeds and news streams
     with structured OHLCV market bars in strict UTC time coordinates.
-    Computes lag features to strictly prevent lookahead bias.
+
+    ALIGNMENT RULE:
+    Each bar k has a designated close timestamp t_close_k.
+    A social post or news article published at timestamp t belongs to bar k
+    if and only if: t_close_{k-1} < t <= t_close_k.
+    Therefore, all features calculated for bar k use data strictly available
+    at or before t_close_k.
+    The prediction target is the return of bar k+1: R_{k+1} = (Close_{k+1} - Close_k) / Close_k.
+    This guarantees zero lookahead leakage into future bars.
     """
 
-    def __init__(self):
-        self.sentiment_analyzer = MultilingualFinancialSentimentAnalyzer()
+    def __init__(self, use_transformer: bool = False):
+        self.sentiment_analyzer = MultilingualFinancialSentimentAnalyzer(use_transformer=use_transformer)
         self.weighting_engine = EngagementWeightingEngine()
 
     def align_and_engineer_features(
@@ -27,12 +35,15 @@ class DataAlignmentProcessor:
         symbol: str,
         price_df: pd.DataFrame,
         social_posts: List[Dict[str, Any]],
-        news_articles: List[Dict[str, Any]]
+        news_articles: List[Dict[str, Any]],
+        bar_interval_minutes: int = 60
     ) -> pd.DataFrame:
-        if price_df.empty:
+        if price_df.empty or len(price_df) < 5:
             return pd.DataFrame()
 
         df = price_df.copy()
+
+        # Returns and forward target definition
         if "return" not in df.columns:
             df["return"] = df["close"].pct_change().fillna(0.0)
         if "log_return" not in df.columns:
@@ -44,13 +55,13 @@ class DataAlignmentProcessor:
         if "target_direction_n1" not in df.columns:
             df["target_direction_n1"] = (df["target_return_n1"] > 0).astype(int)
 
+        # Technical indicators computed strictly on past & current close prices
         df = enrich_technical_features(df)
 
-        # Score social posts and news if not already scored
+        # Score social and news items
         social_posts = self.sentiment_analyzer.score_batch(social_posts)
         news_articles = self.sentiment_analyzer.score_batch(news_articles)
 
-        # Convert to DataFrames for time-based joining
         social_df = pd.DataFrame(social_posts)
         news_df = pd.DataFrame(news_articles)
 
@@ -59,9 +70,12 @@ class DataAlignmentProcessor:
         if not news_df.empty:
             news_df["ts"] = pd.to_datetime(news_df["timestamp_utc"], utc=True)
 
-        bar_dates = df.index.tz_convert("UTC") if df.index.tz else df.index.tz_localize("UTC")
+        # Determine bar open and close timestamps
+        bar_index = df.index.tz_convert("UTC") if df.index.tz else df.index.tz_localize("UTC")
+        delta = timedelta(minutes=bar_interval_minutes)
+        bar_close_times = [t + delta for t in bar_index]
+        df["bar_close_utc"] = bar_close_times
 
-        # Aggregate sentiment metrics for each price bar interval
         bar_social_sentiment = []
         bar_weighted_sentiment = []
         bar_mentions = []
@@ -70,18 +84,18 @@ class DataAlignmentProcessor:
         bar_divergence = []
 
         for i in range(len(df)):
-            current_bar_time = bar_dates[i]
-            prev_bar_time = bar_dates[i - 1] if i > 0 else (current_bar_time - pd.Timedelta(days=1))
+            t_close_curr = bar_close_times[i]
+            t_close_prev = bar_close_times[i - 1] if i > 0 else (t_close_curr - delta)
 
-            # Filter posts strictly up to the current bar time
+            # Strict time partition: t_close_prev < t <= t_close_curr
             if not social_df.empty:
-                mask = (social_df["ts"] > prev_bar_time) & (social_df["ts"] <= current_bar_time)
-                bar_posts = social_posts_subset = social_df[mask].to_dict("records")
+                s_mask = (social_df["ts"] > t_close_prev) & (social_df["ts"] <= t_close_curr)
+                bar_posts = social_df[s_mask].to_dict("records")
             else:
                 bar_posts = []
 
             if not news_df.empty:
-                n_mask = (news_df["ts"] > prev_bar_time) & (news_df["ts"] <= current_bar_time)
+                n_mask = (news_df["ts"] > t_close_prev) & (news_df["ts"] <= t_close_curr)
                 bar_news = news_df[n_mask].to_dict("records")
             else:
                 bar_news = []
@@ -89,7 +103,7 @@ class DataAlignmentProcessor:
             metrics = self.weighting_engine.aggregate_sentiment_metrics(
                 bar_posts,
                 bar_news,
-                ref_time=current_bar_time.to_pydatetime()
+                ref_time=t_close_curr.to_pydatetime()
             )
 
             bar_social_sentiment.append(metrics.get("raw_social_sentiment", 0.0))
@@ -106,20 +120,13 @@ class DataAlignmentProcessor:
         df["news_count"] = bar_news_count
         df["retail_smart_divergence"] = bar_divergence
 
-        # Sentiment momentum and surge dynamics
+        # Rolling sentiment momentum and attention surge
         df["sentiment_momentum"] = df["weighted_sentiment"].diff().fillna(0.0)
         df["mentions_ma3"] = df["social_mentions"].rolling(3, min_periods=1).mean()
         df["mention_surge"] = (df["social_mentions"] / df["mentions_ma3"].replace(0, 1.0) - 1.0).fillna(0.0)
 
-        # Lagged features to eliminate any lookahead leakage
-        feature_cols = [
-            "return", "log_return", "ratio_sma_5", "ratio_sma_10",
-            "rsi_14", "macd_hist", "atr_norm", "vol_ratio",
-            "social_sentiment", "weighted_sentiment", "social_mentions",
-            "news_sentiment", "retail_smart_divergence", "sentiment_momentum", "mention_surge"
-        ]
-
-        for col in feature_cols:
-            df[f"{col}_lag1"] = df[col].shift(1).fillna(0.0)
+        # Drop the warmup rows where technical indicators have NaNs instead of filling fake zeros
+        # This keeps our training data pure without fabricated zero-fill noise
+        df = df.dropna(subset=["return", "rsi_14", "macd_hist", "ratio_sma_5"])
 
         return df

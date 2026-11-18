@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Source Sentiment & n+1 Price Prediction Pipeline</title>
+    <title>Cross-Exchange Sentiment & n+1 Forecast Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
             --bg-secondary: #1e293b;
-            --bg-card: #1e293b;
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
             --accent-green: #10b981;
@@ -22,7 +21,7 @@
         body {
             background-color: var(--bg-primary);
             color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             padding: 24px;
             line-height: 1.5;
         }
@@ -32,19 +31,19 @@
             align-items: center;
             border-bottom: 1px solid var(--border-color);
             padding-bottom: 20px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
-        .header h1 { font-size: 26px; font-weight: 700; color: #fff; }
-        .header .subtitle { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
-        .badge-live {
-            background: rgba(16, 185, 129, 0.2);
-            color: var(--accent-green);
-            padding: 6px 12px;
-            border-radius: 9999px;
-            font-size: 12px;
+        .header h1 { font-size: 24px; font-weight: 700; color: #fff; }
+        .header .subtitle { color: var(--text-secondary); font-size: 13px; margin-top: 4px; }
+        .banner {
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
             font-weight: 600;
-            border: 1px solid rgba(16, 185, 129, 0.4);
+            margin-bottom: 20px;
         }
+        .banner-live { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .banner-simulated { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -57,16 +56,13 @@
             border-radius: 10px;
             padding: 16px 20px;
         }
-        .stat-card .label { color: var(--text-secondary); font-size: 13px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-        .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+        .stat-card .label { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; font-weight: 600; }
+        .stat-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
         .section-title {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            margin: 28px 0 14px 0;
+            margin: 24px 0 12px 0;
             color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
         .card {
             background: var(--bg-secondary);
@@ -86,28 +82,27 @@
             width: 100%;
             border-collapse: collapse;
             text-align: left;
-            font-size: 13px;
+            font-size: 12px;
         }
         th {
             background: #0f172a;
             color: var(--text-secondary);
-            padding: 12px 14px;
+            padding: 10px 12px;
             font-weight: 600;
             text-transform: uppercase;
             font-size: 11px;
-            letter-spacing: 0.5px;
             border-bottom: 1px solid var(--border-color);
         }
         td {
-            padding: 12px 14px;
+            padding: 10px 12px;
             border-bottom: 1px solid var(--border-color);
             color: var(--text-primary);
         }
         tr:hover td { background: rgba(255, 255, 255, 0.02); }
         .pill {
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 11px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 10px;
             font-weight: 600;
             display: inline-block;
         }
@@ -116,61 +111,63 @@
         .pill-neut { background: rgba(245, 158, 11, 0.2); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.4); }
         .text-green { color: var(--accent-green); font-weight: 600; }
         .text-red { color: var(--accent-red); font-weight: 600; }
-        .text-yellow { color: var(--accent-amber); font-weight: 600; }
         .methodology-box {
             background: #111827;
             border-left: 4px solid var(--accent-blue);
             padding: 16px 20px;
             border-radius: 6px;
-            font-size: 13px;
+            font-size: 12px;
             color: #cbd5e1;
             margin-top: 24px;
         }
-        .methodology-box h4 { color: #fff; margin-bottom: 6px; font-size: 14px; }
+        .methodology-box h4 { color: #fff; margin-bottom: 6px; font-size: 13px; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <div>
-            <h1>Cross-Exchange Sentiment & n+1 Price Forecast System</h1>
-            <div class="subtitle">Multi-Source Alternative Data Pipeline (Apify Scrapers & Exa News Ingestion) | Generated: 2026-11-18 17:42:56 UTC</div>
+            <h1>Cross-Exchange Sentiment & n+1 Forecast Pipeline</h1>
+            <div class="subtitle">Hong Kong Stock Exchange (Hang Seng) & Korea Exchange (KOSPI) | Aligned UTC Runs | 2026-11-18 18:44:34 UTC</div>
         </div>
-        <div class="badge-live">UTC ALIGNED PIPELINE</div>
+    </div>
+
+    <div class="banner banner-simulated">
+        ⚠️ SIMULATED DATA WARNING: Fallback synthetic feeds were permitted via --allow-simulation.
     </div>
 
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="label">Total Social Posts Scraped</div>
+            <div class="label">Total Social Posts Analyzed</div>
             <div class="value" style="color: var(--accent-blue);">800</div>
         </div>
         <div class="stat-card">
-            <div class="label">OOS Directional Accuracy</div>
-            <div class="value text-green">47.3%</div>
+            <div class="label">Avg OOS Directional Accuracy</div>
+            <div class="value text-green">48.6%</div>
         </div>
         <div class="stat-card">
-            <div class="label">Walk-Forward Sharpe Ratio</div>
-            <div class="value" style="color: #a855f7;">-1.20</div>
+            <div class="label">Avg Lift vs Naive Baseline</div>
+            <div class="value" style="color: #a855f7;">+1.8%</div>
         </div>
         <div class="stat-card">
-            <div class="label">Market Sentiment Breadth</div>
-            <div class="value"><span class="text-green">7 Bull</span> / <span class="text-red">0 Bear</span></div>
+            <div class="label">Sentiment Breadth</div>
+            <div class="value"><span class="text-green">0 Bull</span> / <span class="text-red">0 Bear</span></div>
         </div>
     </div>
 
     <div class="charts-container">
         <div class="card">
-            <h3 style="font-size: 15px; margin-bottom: 12px;">Social Discussion Volume by Asset (10-Day Window)</h3>
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Social Mention Volume by Asset (Lookback Window)</h3>
             <canvas id="mentionsChart" height="150"></canvas>
         </div>
         <div class="card">
-            <h3 style="font-size: 15px; margin-bottom: 12px;">Sentiment Polarity: Retail Social vs. Exa Institutional News</h3>
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Sentiment Polarity: Retail Social vs Exa Institutional News</h3>
             <canvas id="sentimentChart" height="150"></canvas>
         </div>
     </div>
 
     <div class="section-title">
-        <span>🇭🇰 Hong Kong Stock Exchange (Hang Seng) - Ranked by Social Mentions & Sentiment</span>
+        <span>🇭🇰 Hong Kong Stock Exchange (Hang Seng) - Ranked by Mentions & Sentiment</span>
     </div>
     <div class="card">
         <table>
@@ -178,109 +175,127 @@
                 <tr>
                     <th>Ticker</th>
                     <th>Asset Name</th>
-                    <th>Current Price</th>
+                    <th>Price</th>
                     <th>Mentions</th>
                     <th>Social Sent.</th>
                     <th>News Sent.</th>
                     <th>Composite</th>
                     <th>Direction</th>
-                    <th>Position</th>
+                    <th>Stated Pos</th>
+                    <th>Stance</th>
                     <th>Support (S1)</th>
+                    <th>Swing Low</th>
                     <th>Pivot</th>
                     <th>Resistance (R1)</th>
-                    <th>Predicted (n+1)</th>
-                    <th>OOS Hit%</th>
+                    <th>Target n+1</th>
+                    <th>OOS Acc (n)</th>
+                    <th>Lift vs Base</th>
                 </tr>
             </thead>
             <tbody>
                 
             <tr>
+                <td><strong>9988.HK</strong></td>
+                <td>Alibaba Group Holding</td>
+                <td>85.25 HKD</td>
+                <td style="font-weight:600; color:#38bdf8;">80</td>
+                <td>+0.06</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.04</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">81.32</td>
+                <td style="color:#cbd5e1;">84.25</td>
+                <td style="color:#94a3b8;">88.18</td>
+                <td class="text-red">92.12</td>
+                <td><strong>84.52</strong> <span class="text-red" style="font-size:11px;">(-0.86%)</span></td>
+                <td>50.0% (72)</td>
+                <td><span class="text-red">-1.4%</span></td>
+            </tr>
+            
+
+            <tr>
                 <td><strong>1810.HK</strong></td>
                 <td>Xiaomi Corporation</td>
-                <td>29.70 HKD</td>
+                <td>29.66 HKD</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.40</td>
-                <td>+0.19</td>
-                <td style="font-weight:600;">+0.33</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">27.63</td>
-                <td style="color:#94a3b8;">29.69</td>
-                <td class="text-red">31.75</td>
-                <td><strong>30.33</strong> <span class="text-green" style="font-size:11px;">(+2.12%)</span></td>
-                <td>66.7%</td>
-            </tr>
-            
-
-            <tr>
-                <td><strong>0005.HK</strong></td>
-                <td>HSBC Holdings plc</td>
-                <td>138.50 HKD</td>
-                <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.32</td>
-                <td>+0.30</td>
-                <td style="font-weight:600;">+0.31</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">132.90</td>
-                <td style="color:#94a3b8;">138.10</td>
-                <td class="text-red">143.70</td>
-                <td><strong>137.69</strong> <span class="text-red" style="font-size:11px;">(-0.58%)</span></td>
-                <td>46.7%</td>
-            </tr>
-            
-
-            <tr>
-                <td><strong>0700.HK</strong></td>
-                <td>Tencent Holdings Ltd.</td>
-                <td>376.00 HKD</td>
-                <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.25</td>
-                <td>+0.25</td>
-                <td style="font-weight:600;">+0.25</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">357.60</td>
-                <td style="color:#94a3b8;">394.40</td>
-                <td class="text-red">412.80</td>
-                <td><strong>374.58</strong> <span class="text-red" style="font-size:11px;">(-0.38%)</span></td>
-                <td>53.3%</td>
+                <td>+0.03</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.02</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">SHORT</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">28.57</td>
+                <td style="color:#cbd5e1;">29.42</td>
+                <td style="color:#94a3b8;">29.55</td>
+                <td class="text-red">30.63</td>
+                <td><strong>29.70</strong> <span class="text-green" style="font-size:11px;">(+0.13%)</span></td>
+                <td>41.7% (72)</td>
+                <td><span class="text-green">+4.2%</span></td>
             </tr>
             
 
             <tr>
                 <td><strong>3690.HK</strong></td>
                 <td>Meituan</td>
-                <td>70.50 HKD</td>
+                <td>70.15 HKD</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.23</td>
-                <td>+0.29</td>
-                <td style="font-weight:600;">+0.25</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">65.50</td>
-                <td style="color:#94a3b8;">74.25</td>
-                <td class="text-red">79.25</td>
-                <td><strong>70.85</strong> <span class="text-green" style="font-size:11px;">(+0.50%)</span></td>
-                <td>46.7%</td>
+                <td>-0.01</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">-0.00</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">SHORT</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">68.62</td>
+                <td style="color:#cbd5e1;">69.85</td>
+                <td style="color:#94a3b8;">70.78</td>
+                <td class="text-red">72.32</td>
+                <td><strong>69.82</strong> <span class="text-red" style="font-size:11px;">(-0.47%)</span></td>
+                <td>44.4% (72)</td>
+                <td><span class="text-red">-5.6%</span></td>
             </tr>
             
 
             <tr>
-                <td><strong>9988.HK</strong></td>
-                <td>Alibaba Group Holding</td>
-                <td>85.45 HKD</td>
+                <td><strong>0005.HK</strong></td>
+                <td>HSBC Holdings plc</td>
+                <td>136.00 HKD</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.17</td>
-                <td>-0.02</td>
-                <td style="font-weight:600;">+0.10</td>
+                <td>-0.09</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">-0.06</td>
                 <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">SHORT</td>
                 <td><span style="color:#64748b;">NEUTRAL</span></td>
-                <td class="text-green">77.23</td>
-                <td style="color:#94a3b8;">93.32</td>
-                <td class="text-red">101.53</td>
-                <td><strong>84.04</strong> <span class="text-red" style="font-size:11px;">(-1.65%)</span></td>
-                <td>46.7%</td>
+                <td class="text-green">133.53</td>
+                <td style="color:#cbd5e1;">135.10</td>
+                <td style="color:#94a3b8;">137.57</td>
+                <td class="text-red">140.03</td>
+                <td><strong>136.30</strong> <span class="text-green" style="font-size:11px;">(+0.22%)</span></td>
+                <td>50.0% (72)</td>
+                <td><span class="text-green">+5.6%</span></td>
+            </tr>
+            
+
+            <tr>
+                <td><strong>0700.HK</strong></td>
+                <td>Tencent Holdings Ltd.</td>
+                <td>372.80 HKD</td>
+                <td style="font-weight:600; color:#38bdf8;">80</td>
+                <td>-0.11</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">-0.07</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">SHORT</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">360.53</td>
+                <td style="color:#cbd5e1;">370.00</td>
+                <td style="color:#94a3b8;">382.27</td>
+                <td class="text-red">394.53</td>
+                <td><strong>371.20</strong> <span class="text-red" style="font-size:11px;">(-0.43%)</span></td>
+                <td>47.2% (72)</td>
+                <td><span class="text-green">+1.4%</span></td>
             </tr>
             
             </tbody>
@@ -288,7 +303,7 @@
     </div>
 
     <div class="section-title">
-        <span>🇰🇷 Korea Stock Exchange (KRX / KOSPI) - Ranked by Social Mentions & Sentiment</span>
+        <span>🇰🇷 Korea Stock Exchange (KRX / KOSPI) - Ranked by Mentions & Sentiment</span>
     </div>
     <div class="card">
         <table>
@@ -296,18 +311,21 @@
                 <tr>
                     <th>Ticker</th>
                     <th>Asset Name</th>
-                    <th>Current Price</th>
+                    <th>Price</th>
                     <th>Mentions</th>
                     <th>Social Sent.</th>
                     <th>News Sent.</th>
                     <th>Composite</th>
                     <th>Direction</th>
-                    <th>Position</th>
+                    <th>Stated Pos</th>
+                    <th>Stance</th>
                     <th>Support (S1)</th>
+                    <th>Swing Low</th>
                     <th>Pivot</th>
                     <th>Resistance (R1)</th>
-                    <th>Predicted (n+1)</th>
-                    <th>OOS Hit%</th>
+                    <th>Target n+1</th>
+                    <th>OOS Acc (n)</th>
+                    <th>Lift vs Base</th>
                 </tr>
             </thead>
             <tbody>
@@ -315,90 +333,105 @@
             <tr>
                 <td><strong>005380.KS</strong></td>
                 <td>Hyundai Motor Co.</td>
-                <td>259,000.00 KRW</td>
+                <td>268,000.00 KRW</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.35</td>
-                <td>+0.19</td>
-                <td style="font-weight:600;">+0.30</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">241,666.67</td>
-                <td style="color:#94a3b8;">274,833.33</td>
-                <td class="text-red">292,166.67</td>
-                <td><strong>256,385.55</strong> <span class="text-red" style="font-size:11px;">(-1.01%)</span></td>
-                <td>66.7%</td>
+                <td>+0.10</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.06</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">253,666.67</td>
+                <td style="color:#cbd5e1;">252,000.00</td>
+                <td style="color:#94a3b8;">266,333.33</td>
+                <td class="text-red">280,666.67</td>
+                <td><strong>267,233.80</strong> <span class="text-red" style="font-size:11px;">(-0.29%)</span></td>
+                <td>54.0% (63)</td>
+                <td><span class="text-green">+14.3%</span></td>
             </tr>
             
 
             <tr>
                 <td><strong>000660.KS</strong></td>
                 <td>SK Hynix Inc.</td>
-                <td>1,098,000.00 KRW</td>
+                <td>1,148,000.00 KRW</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.38</td>
-                <td>+0.12</td>
-                <td style="font-weight:600;">+0.29</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">966,000.00</td>
-                <td style="color:#94a3b8;">1,221,000.00</td>
-                <td class="text-red">1,353,000.00</td>
-                <td><strong>1,111,855.44</strong> <span class="text-green" style="font-size:11px;">(+1.26%)</span></td>
-                <td>13.3%</td>
+                <td>+0.03</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.02</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">1,055,000.00</td>
+                <td style="color:#cbd5e1;">1,093,000.00</td>
+                <td style="color:#94a3b8;">1,186,000.00</td>
+                <td class="text-red">1,279,000.00</td>
+                <td><strong>1,140,837.72</strong> <span class="text-red" style="font-size:11px;">(-0.62%)</span></td>
+                <td>52.4% (63)</td>
+                <td><span class="text-red">-4.8%</span></td>
             </tr>
             
 
             <tr>
                 <td><strong>035420.KS</strong></td>
                 <td>NAVER Corporation</td>
-                <td>170,000.00 KRW</td>
+                <td>170,200.00 KRW</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.23</td>
-                <td>+0.18</td>
-                <td style="font-weight:600;">+0.21</td>
-                <td><span class="pill pill-bull">BULLISH</span></td>
-                <td><span class="text-green" style="font-weight:700;">LONG</span></td>
-                <td class="text-green">158,033.33</td>
-                <td style="color:#94a3b8;">177,966.67</td>
-                <td class="text-red">189,933.33</td>
-                <td><strong>170,046.41</strong> <span class="text-green" style="font-size:11px;">(+0.03%)</span></td>
-                <td>46.7%</td>
+                <td>+0.01</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.01</td>
+                <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
+                <td><span style="color:#64748b;">NEUTRAL</span></td>
+                <td class="text-green">162,400.00</td>
+                <td style="color:#cbd5e1;">168,000.00</td>
+                <td style="color:#94a3b8;">175,800.00</td>
+                <td class="text-red">183,600.00</td>
+                <td><strong>170,671.94</strong> <span class="text-green" style="font-size:11px;">(+0.28%)</span></td>
+                <td>50.8% (63)</td>
+                <td><span class="text-red">-3.2%</span></td>
             </tr>
             
 
             <tr>
                 <td><strong>005930.KS</strong></td>
                 <td>Samsung Electronics Co.</td>
-                <td>190,300.00 KRW</td>
+                <td>193,600.00 KRW</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
-                <td>+0.06</td>
-                <td>+0.19</td>
-                <td style="font-weight:600;">+0.11</td>
+                <td>+0.01</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">+0.00</td>
                 <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
                 <td><span style="color:#64748b;">NEUTRAL</span></td>
-                <td class="text-green">170,333.33</td>
-                <td style="color:#94a3b8;">199,166.67</td>
-                <td class="text-red">219,133.33</td>
-                <td><strong>191,751.57</strong> <span class="text-green" style="font-size:11px;">(+0.76%)</span></td>
-                <td>40.0%</td>
+                <td class="text-green">182,933.33</td>
+                <td style="color:#cbd5e1;">188,800.00</td>
+                <td style="color:#94a3b8;">199,466.67</td>
+                <td class="text-red">210,133.33</td>
+                <td><strong>192,695.36</strong> <span class="text-red" style="font-size:11px;">(-0.47%)</span></td>
+                <td>49.2% (63)</td>
+                <td><span class="text-red">-1.6%</span></td>
             </tr>
             
 
             <tr>
                 <td><strong>035720.KS</strong></td>
                 <td>Kakao Corp.</td>
-                <td>31,700.00 KRW</td>
+                <td>31,850.00 KRW</td>
                 <td style="font-weight:600; color:#38bdf8;">80</td>
                 <td>-0.04</td>
-                <td>+0.27</td>
-                <td style="font-weight:600;">+0.07</td>
+                <td>+0.00</td>
+                <td style="font-weight:600;">-0.03</td>
                 <td><span class="pill pill-neut">NEUTRAL</span></td>
+                <td style="color:#94a3b8;">LONG</td>
                 <td><span style="color:#64748b;">NEUTRAL</span></td>
-                <td class="text-green">28,966.67</td>
-                <td style="color:#94a3b8;">31,133.33</td>
-                <td class="text-red">33,866.67</td>
-                <td><strong>31,618.92</strong> <span class="text-red" style="font-size:11px;">(-0.26%)</span></td>
-                <td>46.7%</td>
+                <td class="text-green">31,250.00</td>
+                <td style="color:#cbd5e1;">31,400.00</td>
+                <td style="color:#94a3b8;">32,000.00</td>
+                <td class="text-red">32,600.00</td>
+                <td><strong>31,955.36</strong> <span class="text-green" style="font-size:11px;">(+0.33%)</span></td>
+                <td>46.0% (63)</td>
+                <td><span class="text-green">+9.5%</span></td>
             </tr>
             
             </tbody>
@@ -406,11 +439,11 @@
     </div>
 
     <div class="methodology-box">
-        <h4>Methodology & Quantitative Model Architecture:</h4>
-        <p><strong>1. Data Ingestion:</strong> Multi-source ingestion capturing retail community forums (LIHKG, Futu/Moomoo, Naver Finance, Daum Finance) via Apify actors and institutional news via Exa.com neural search across top financial outlets.</p>
-        <p><strong>2. Engagement-Weighted Sentiment Index:</strong> Weights posts by author reach (logarithmic follower scale), virality (likes, reposts, comments), and exponential time decay (half-life of 3 days).</p>
-        <p><strong>3. Retail vs Institutional Divergence (RSMD):</strong> Computes sentiment delta between retail crowds and institutional coverage to identify potential retail trap distributions near resistance and capitulation accumulation near support.</p>
-        <p><strong>4. Out-of-Sample Walk-Forward Validation:</strong> Machine learning forecasts (blended XGBoost + L2 Ridge Regression) are evaluated strictly on out-of-sample forward folds with zero lookahead bias.</p>
+        <h4>Methodology, Baseline Comparisons & Limitations:</h4>
+        <p><strong>1. Strict No-Leakage Time Alignment:</strong> Features for predicting bar t+1 are calculated using market and alternative data available strictly at or before the close of bar t.</p>
+        <p><strong>2. Naive Baseline & Statistical Tests:</strong> Model accuracy is benchmarked against a naive persistence baseline (sign of preceding bar return). Binomial p-values are computed to evaluate whether directional accuracy exceeds 50% significantly.</p>
+        <p><strong>3. Position Tracking:</strong> Stated positions reflect retail traders' self-reported holdings in forum discourse. The suggested stance is the quantitative model's risk-adjusted recommendation.</p>
+        <p><strong>4. Verification & Audit:</strong> If run with `--allow-simulation`, synthetic data is tagged and marked across all records and charts.</p>
     </div>
 
     <script>
@@ -422,7 +455,7 @@
                 datasets: [{
                     label: 'Social Mentions',
                     data: [80, 80, 80, 80, 80, 80, 80, 80, 80, 80],
-                    backgroundColor: ["#10b981", "#f59e0b", "#10b981", "#10b981", "#10b981", "#f59e0b", "#10b981", "#10b981", "#f59e0b", "#10b981"],
+                    backgroundColor: ["#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b", "#f59e0b"],
                     borderRadius: 4
                 }]
             },
@@ -444,19 +477,19 @@
                 datasets: [
                     {
                         label: 'Weighted Social',
-                        data: [0.2515, 0.1725, 0.2266, 0.3958, 0.3161, 0.0621, 0.3751, 0.2256, -0.0382, 0.3546],
+                        data: [-0.1105, 0.0591, -0.0063, 0.0283, -0.0918, 0.0075, 0.0257, 0.0123, -0.0407, 0.0991],
                         backgroundColor: '#3b82f6',
                         borderRadius: 3
                     },
                     {
                         label: 'Exa Institutional News',
-                        data: [0.2476, -0.0212, 0.2929, 0.1947, 0.2978, 0.1922, 0.1235, 0.1848, 0.2709, 0.1939],
+                        data: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                         backgroundColor: '#a855f7',
                         borderRadius: 3
                     },
                     {
                         label: 'Composite Score',
-                        data: [0.2502, 0.1047, 0.2498, 0.3254, 0.3097, 0.1076, 0.287, 0.2113, 0.0699, 0.2983],
+                        data: [-0.0718, 0.0384, -0.0041, 0.0184, -0.0597, 0.0049, 0.0167, 0.008, -0.0264, 0.0644],
                         backgroundColor: '#10b981',
                         borderRadius: 3
                     }
