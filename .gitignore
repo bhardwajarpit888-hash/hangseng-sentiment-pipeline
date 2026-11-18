@@ -1,0 +1,33 @@
+# Environment & Secrets
+.env
+.env.local
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data & Parquet Cache (Generated at runtime)
+data/cache/
+*.parquet
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
